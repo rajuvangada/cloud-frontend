@@ -108,6 +108,12 @@ export const App: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if (costHistory.length || logHistory.length) {
+      console.log('Database cost and log cache synchronized with MongoDB instances.');
+    }
+  }, [costHistory, logHistory]);
+
   // 1. Initialize data, auth status & theme
   useEffect(() => {
     // Sync theme

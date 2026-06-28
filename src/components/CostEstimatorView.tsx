@@ -5,7 +5,8 @@ import {
   calculateS3Cost,
   calculateLambdaCost,
   calculateRdsCost,
-  calculateGenericCost
+  calculateGenericCost,
+  fetchServices
 } from '../utils/api';
 import { LoadingSpinner } from './LoadingSpinner';
 import { ResultCard } from './ResultCard';
@@ -66,7 +67,7 @@ const AWS_CATALOG = [
     ]
   },
   {
-    category: 'Networking',
+    category: 'Networking & Content Delivery',
     icon: Activity,
     services: [
       { id: 'vpc', name: 'Amazon VPC Network Routing', tags: 'virtual private cloud network subnet internet gateway route connections ip vpn gateway transit', fields: 'generic', unit: 'GB-Data', defaultRate: 0.0100 },
@@ -77,7 +78,7 @@ const AWS_CATALOG = [
     ]
   },
   {
-    category: 'Security',
+    category: 'Security, Identity & Compliance',
     icon: Shield,
     services: [
       { id: 'iam', name: 'IAM Access Rights Policy', tags: 'security policy user access permissions policies roles certificates identity credentials groups accesskey MFA', fields: 'generic', unit: 'Active Users', defaultRate: 0.0000 },
@@ -95,7 +96,7 @@ const AWS_CATALOG = [
     ]
   },
   {
-    category: 'AI/ML',
+    category: 'Machine Learning & AI',
     icon: Brain,
     services: [
       { id: 'sagemaker', name: 'SageMaker Studio Notebooks', tags: 'jupyter machine learning AI sagemaker model notebooks testing training deploy inference sagemaker studio pipeline', fields: 'generic', unit: 'Compute Hours', defaultRate: 0.0560 },
@@ -104,7 +105,7 @@ const AWS_CATALOG = [
     ]
   },
   {
-    category: 'Monitoring',
+    category: 'Management & Governance',
     icon: Eye,
     services: [
       { id: 'cloudwatch', name: 'CloudWatch metrics & logs', tags: 'metrics alerts alarm log file logs charts analytics debug insight cloudwatch alerts dash metric agent ingestion', fields: 'generic', unit: 'GB Ingested', defaultRate: 0.3000 },
@@ -118,6 +119,18 @@ const INSTANCE_SPECS = [
   { type: 't2.small', cpu: '1 vCPU', ram: '2 GiB', price: '$0.0230/hr', desc: 'Burstable general purpose' },
   { type: 't3.micro', cpu: '2 vCPUs', ram: '1 GiB', price: '$0.0104/hr', desc: 'Next-gen burstable, cost optimized' },
 ];
+
+const ICON_MAP: Record<string, React.ComponentType<any>> = {
+  Cpu,
+  Cloud,
+  Database,
+  Activity,
+  Shield,
+  BarChart,
+  Brain,
+  Eye,
+  Layers
+};
 
 export const CostEstimatorView: React.FC<CostEstimatorViewProps> = ({
   onAddEstimate,
@@ -133,6 +146,194 @@ export const CostEstimatorView: React.FC<CostEstimatorViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
   const [expandedCategory, setExpandedCategory] = useState<string | null>('Compute');
+
+  // Catalog loading and search navigation states
+  const [catalog, setCatalog] = useState<any[]>([]);
+  const [dynamicCatalogLoaded, setDynamicCatalogLoaded] = useState(false);
+  const [focusedIndex, setFocusedIndex] = useState(0);
+
+  const [recentSelections, setRecentSelections] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem('cloudinsight_recent_services');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [favorites, setFavorites] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('cloudinsight_favorite_services');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    const loadCatalog = async () => {
+      try {
+        const response = await fetchServices();
+        if (response && Array.isArray(response.data)) {
+          setCatalog(response.data);
+          setDynamicCatalogLoaded(true);
+        }
+      } catch (err) {
+        console.warn('Failed to load services catalog, falling back to static catalog', err);
+      }
+    };
+    loadCatalog();
+  }, []);
+
+  const getFlatCatalog = () => {
+    if (dynamicCatalogLoaded && catalog.length > 0) {
+      return catalog;
+    }
+    const flat: any[] = [];
+    AWS_CATALOG.forEach((cat) => {
+      cat.services.forEach((svc) => {
+        flat.push({
+          id: svc.id,
+          name: svc.name,
+          category: cat.category,
+          fields: svc.fields,
+          tier: svc.id === 'ec2' || svc.id === 'rds' || svc.id === 'ebs' || svc.id === 'ecs' || svc.id === 'eks' || svc.id === 'redshift' || svc.id === 'elasticache' || svc.id === 'fsx' ? 1 : (svc.id === 's3' || svc.id === 'lambda' || svc.id === 'dynamodb' || svc.id === 'cloudfront' || svc.id === 'api-gateway' || svc.id === 'route53' || svc.id === 'cloudwatch' ? 2 : 3),
+          icon: cat.category,
+          description: svc.name,
+          unit: (svc as any).unit,
+          defaultRate: (svc as any).defaultRate
+        });
+      });
+    });
+    return flat;
+  };
+
+  const getGroupedCatalog = () => {
+    const flatList = getFlatCatalog();
+    const categoriesMap: Record<string, any[]> = {};
+    flatList.forEach((svc) => {
+      const cat = svc.category || 'Other';
+      if (!categoriesMap[cat]) {
+        categoriesMap[cat] = [];
+      }
+      categoriesMap[cat].push(svc);
+    });
+
+    return Object.keys(categoriesMap).map((catName) => {
+      const firstSvc = categoriesMap[catName][0];
+      const iconComponent = ICON_MAP[firstSvc?.icon || 'Layers'] || Layers;
+      return {
+        category: catName,
+        icon: iconComponent,
+        services: categoriesMap[catName]
+      };
+    });
+  };
+
+  const getFilteredServices = () => {
+    if (!searchQuery) return [];
+    const query = searchQuery.toLowerCase();
+    const results: any[] = [];
+    const flatList = getFlatCatalog();
+    flatList.forEach((svc) => {
+      const tags = `${svc.name} ${svc.id} ${svc.category} ${svc.description || ''}`.toLowerCase();
+      if (tags.includes(query)) {
+        results.push(svc);
+      }
+    });
+    return results;
+  };
+
+  const getFavServices = () => {
+    const flatList = getFlatCatalog();
+    return flatList.filter((svc) => favorites.includes(svc.id));
+  };
+
+  const getCommonServices = () => {
+    const flatList = getFlatCatalog();
+    const commonIds = ['ec2', 's3', 'lambda', 'rds', 'dynamodb', 'ecs', 'eks', 'vpc', 'cloudfront', 'ebs', 'route53', 'cloudwatch'];
+    return flatList.filter((svc) => commonIds.includes(svc.id));
+  };
+
+  const getDropdownOptions = () => {
+    if (searchQuery) {
+      return getFilteredServices();
+    }
+    const options: any[] = [];
+    if (recentSelections.length > 0) {
+      options.push(...recentSelections.map(x => ({ ...x, _group: 'Recent' })));
+    }
+    const favs = getFavServices();
+    if (favs.length > 0) {
+      options.push(...favs.map(x => ({ ...x, _group: 'Favorites' })));
+    }
+    const common = getCommonServices();
+    options.push(...common.map(x => ({ ...x, _group: 'Common' })));
+    
+    // Deduplicate options if a service appears in multiple sections (e.g. EC2 in Recent and Common)
+    const seenIds = new Set<string>();
+    return options.filter((svc) => {
+      const key = `${svc.id}-${svc._group}`;
+      if (seenIds.has(key)) return false;
+      seenIds.add(key);
+      return true;
+    });
+  };
+
+  const addToRecent = (svc: any) => {
+    const updated = [svc, ...recentSelections.filter(x => x.id !== svc.id)].slice(0, 4);
+    setRecentSelections(updated);
+    localStorage.setItem('cloudinsight_recent_services', JSON.stringify(updated));
+  };
+
+  const toggleFavorite = (svcId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = favorites.includes(svcId)
+      ? favorites.filter(id => id !== svcId)
+      : [...favorites, svcId];
+    setFavorites(updated);
+    localStorage.setItem('cloudinsight_favorite_services', JSON.stringify(updated));
+  };
+
+  const handleSelectService = (svc: any) => {
+    setSelectedService(svc);
+    setSearchQuery(svc.name);
+    setShowDropdown(false);
+    addToRecent(svc);
+
+    // Seed generic parameters if selected a generic fields service
+    if (svc.fields === 'generic') {
+      setGenericResource('standard-resource');
+      setGenericUnit(svc.unit || 'units');
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!showDropdown) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter') {
+        setShowDropdown(true);
+      }
+      return;
+    }
+
+    const options = getDropdownOptions();
+    if (options.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setFocusedIndex((prev) => (prev + 1) % options.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setFocusedIndex((prev) => (prev - 1 + options.length) % options.length);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (focusedIndex >= 0 && focusedIndex < options.length) {
+        handleSelectService(options[focusedIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      setShowDropdown(false);
+    }
+  };
 
   // Input states
   const [instanceType, setInstanceType] = useState('t2.micro');
@@ -168,38 +369,6 @@ export const CostEstimatorView: React.FC<CostEstimatorViewProps> = ({
     document.addEventListener('mousedown', handleOutsideClick);
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
-
-  // Filter services dynamically for autocomplete fuzzy searching
-  const getFilteredServices = () => {
-    if (!searchQuery) return [];
-    const query = searchQuery.toLowerCase();
-    const results: any[] = [];
-    AWS_CATALOG.forEach((cat) => {
-      cat.services.forEach((svc) => {
-        if (
-          svc.name.toLowerCase().includes(query) ||
-          svc.id.toLowerCase().includes(query) ||
-          svc.tags.toLowerCase().includes(query) ||
-          cat.category.toLowerCase().includes(query)
-        ) {
-          results.push({ ...svc, category: cat.category });
-        }
-      });
-    });
-    return results;
-  };
-
-  const handleSelectService = (svc: any) => {
-    setSelectedService(svc);
-    setSearchQuery(svc.name);
-    setShowDropdown(false);
-
-    // Seed generic parameters if selected a generic fields service
-    if (svc.fields === 'generic') {
-      setGenericResource('standard-resource');
-      setGenericUnit(svc.unit || 'units');
-    }
-  };
 
   const handleCalculate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -274,7 +443,12 @@ export const CostEstimatorView: React.FC<CostEstimatorViewProps> = ({
   };
 
   const copyResultText = latestResult
-    ? latestResult.service === 's3'
+    ? latestResult.supported === false
+      ? `AWS Cost Estimate (CloudInsight Lite):\n` +
+        `- Service: ${latestResult.service?.toUpperCase()}\n` +
+        `- Status: Unsupported\n` +
+        `- Message: ${latestResult.message || 'Pricing engine coming soon.'}`
+      : latestResult.service === 's3'
       ? `AWS S3 Cost Estimate (CloudInsight Lite):\n` +
         `- Storage Size: ${latestResult.storageGB} GB\n` +
         `- Estimated Monthly Cost: $${latestResult.estimatedMonthlyCost.toFixed(4)}\n` +
@@ -295,7 +469,7 @@ export const CostEstimatorView: React.FC<CostEstimatorViewProps> = ({
         `- Suggested Savings Plan Option: -$${latestResult.suggestedSavings.toFixed(2)}/mo`
     : '';
 
-  const filteredAutocomplete = getFilteredServices();
+
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -326,6 +500,7 @@ export const CostEstimatorView: React.FC<CostEstimatorViewProps> = ({
                   setSearchQuery(e.target.value);
                   setShowDropdown(true);
                 }}
+                onKeyDown={handleKeyDown}
                 placeholder="Search services (e.g. lambda, S3, database...)"
                 className="w-full text-sm rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 pl-9 pr-3 py-2 outline-hidden focus:ring-1 focus:ring-linear dark:focus:ring-aws text-zinc-900 dark:text-white transition-all"
               />
@@ -333,20 +508,48 @@ export const CostEstimatorView: React.FC<CostEstimatorViewProps> = ({
             </div>
 
             {/* Suggestions dropdown card */}
-            {showDropdown && searchQuery && filteredAutocomplete.length > 0 && (
-              <div className="absolute left-0 right-0 mt-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-lg z-50 max-h-56 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-800">
-                {filteredAutocomplete.map((svc) => (
-                  <button
-                    key={svc.id}
-                    onClick={() => handleSelectService(svc)}
-                    className="w-full text-left px-4 py-2.5 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-900/60 transition-colors flex justify-between items-center cursor-pointer text-zinc-700 dark:text-zinc-300"
-                  >
-                    <span>{svc.name}</span>
-                    <span className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 px-2 py-0.5 rounded font-medium">
-                      {svc.category}
-                    </span>
-                  </button>
-                ))}
+            {showDropdown && getDropdownOptions().length > 0 && (
+              <div className="absolute left-0 right-0 mt-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-800">
+                {getDropdownOptions().map((svc, idx) => {
+                  const isFocused = idx === focusedIndex;
+                  const isFav = favorites.includes(svc.id);
+                  return (
+                    <div
+                      key={`${svc.id}-${idx}`}
+                      onMouseEnter={() => setFocusedIndex(idx)}
+                      onClick={() => handleSelectService(svc)}
+                      className={`w-full text-left px-4 py-2.5 text-xs flex justify-between items-center cursor-pointer transition-colors ${
+                        isFocused 
+                          ? 'bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-white' 
+                          : 'text-zinc-700 dark:text-zinc-300'
+                      }`}
+                    >
+                      <div className="flex flex-col gap-0.5 max-w-[65%]">
+                        <span className="font-semibold truncate">{svc.name}</span>
+                        <span className="text-[10px] text-zinc-400 dark:text-zinc-550 truncate">{svc.description || svc.name}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        {svc._group && (
+                          <span className="text-[8px] uppercase tracking-wider font-semibold text-zinc-405 dark:text-zinc-550 bg-zinc-100 dark:bg-zinc-900 px-1 py-0.5 rounded font-mono">
+                            {svc._group}
+                          </span>
+                        )}
+                        <span className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 px-2 py-0.5 rounded font-medium">
+                          {svc.category}
+                        </span>
+                        <button
+                          onClick={(e) => toggleFavorite(svc.id, e)}
+                          className={`p-1 hover:text-amber-500 transition-colors text-xs ${
+                            isFav ? 'text-amber-400' : 'text-zinc-300 dark:text-zinc-650'
+                          }`}
+                          title={isFav ? "Remove from Favorites" : "Add to Favorites"}
+                        >
+                          ★
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -358,14 +561,14 @@ export const CostEstimatorView: React.FC<CostEstimatorViewProps> = ({
             </h3>
             
             <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
-              {AWS_CATALOG.map((cat) => {
+              {getGroupedCatalog().map((cat) => {
                 const CatIcon = cat.icon;
                 const isExpanded = expandedCategory === cat.category;
                 return (
                   <div key={cat.category} className="border border-zinc-100 dark:border-zinc-800/50 rounded-lg overflow-hidden">
                     <button
                       onClick={() => setExpandedCategory(isExpanded ? null : cat.category)}
-                      className="w-full flex justify-between items-center p-3 text-xs font-semibold text-zinc-800 dark:text-zinc-200 bg-zinc-50/50 hover:bg-zinc-50 dark:bg-zinc-950/20 dark:hover:bg-zinc-950/40 transition-colors cursor-pointer"
+                      className="w-full flex justify-between items-center p-3 text-xs font-semibold text-zinc-800 dark:text-zinc-200 bg-zinc-50/50 hover:bg-zinc-50 dark:bg-zinc-955/20 dark:hover:bg-zinc-955/40 transition-colors cursor-pointer"
                     >
                       <span className="flex items-center gap-2">
                         <CatIcon className="w-3.5 h-3.5 text-linear dark:text-aws" />
@@ -745,114 +948,129 @@ export const CostEstimatorView: React.FC<CostEstimatorViewProps> = ({
             </div>
           ) : latestResult ? (
             <div className="space-y-6">
-              {/* Output Result Card wrapper */}
               <ResultCard
                 title="Cost Calculations & Optimization recommendations"
                 isMocked={latestResult.isMocked}
                 copyText={copyResultText}
               >
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                  {/* Monthly card */}
-                  <div className="p-5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 rounded-xl flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Estimated Monthly Cost</span>
-                    <span className="text-3xl font-extrabold text-zinc-900 dark:text-white font-mono">
-                      ${latestResult.service === 'lambda' 
-                        ? latestResult.estimatedMonthlyCost.toFixed(6) 
-                        : latestResult.service === 's3'
-                        ? latestResult.estimatedMonthlyCost.toFixed(4)
-                        : latestResult.estimatedMonthlyCost.toFixed(2)}
-                    </span>
-                    <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
-                      {latestResult.service === 's3' 
-                        ? `${latestResult.storageGB || 0} GB Standard` 
-                        : latestResult.service === 'lambda'
-                        ? `${(latestResult.requests || 0).toLocaleString()} runs`
-                        : `Based on ${latestResult.hours} hours`}
-                    </span>
+                {latestResult.supported === false ? (
+                  <div className="flex flex-col items-center justify-center p-8 bg-zinc-50/50 dark:bg-zinc-950/20 border border-zinc-200 dark:border-zinc-800/80 rounded-xl gap-3.5 py-12 text-center">
+                    <div className="p-3 bg-amber-50 dark:bg-amber-955/20 text-amber-500 rounded-full border border-amber-100 dark:border-amber-900/30">
+                      <Info className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-zinc-900 dark:text-white">Pricing Engine Coming Soon</h4>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-sm">
+                        {latestResult.message || "This AWS service is not yet fully configured in our calculation engine."}
+                      </p>
+                    </div>
                   </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                      {/* Monthly card */}
+                      <div className="p-5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 rounded-xl flex flex-col gap-1.5">
+                        <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Estimated Monthly Cost</span>
+                        <span className="text-3xl font-extrabold text-zinc-900 dark:text-white font-mono">
+                          ${latestResult.service === 'lambda' 
+                            ? latestResult.estimatedMonthlyCost.toFixed(6) 
+                            : latestResult.service === 's3'
+                            ? latestResult.estimatedMonthlyCost.toFixed(4)
+                            : latestResult.estimatedMonthlyCost.toFixed(2)}
+                        </span>
+                        <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
+                          {latestResult.service === 's3' 
+                            ? `${latestResult.storageGB || 0} GB Standard` 
+                            : latestResult.service === 'lambda'
+                            ? `${(latestResult.requests || 0).toLocaleString()} runs`
+                            : `Based on ${latestResult.hours} hours`}
+                        </span>
+                      </div>
 
-                  {/* Suggested Savings */}
-                  <div className="p-5 bg-emerald-50/40 dark:bg-emerald-950/15 border border-emerald-100/80 dark:border-emerald-900/20 rounded-xl flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1">
-                      <TrendingDown className="w-3.5 h-3.5" /> Suggested Savings
-                    </span>
-                    <span className="text-3xl font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">
-                      -${latestResult.service === 'lambda' 
-                        ? latestResult.suggestedSavings.toFixed(6) 
-                        : latestResult.service === 's3'
-                        ? latestResult.suggestedSavings.toFixed(4)
-                        : latestResult.suggestedSavings.toFixed(2)}
-                    </span>
-                    <span className="text-[10px] text-emerald-600/70 dark:text-emerald-500 font-medium">Optimization strategy savings</span>
-                  </div>
+                      {/* Suggested Savings */}
+                      <div className="p-5 bg-emerald-50/40 dark:bg-emerald-955/15 border border-emerald-100/80 dark:border-emerald-900/20 rounded-xl flex flex-col gap-1.5">
+                        <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1">
+                          <TrendingDown className="w-3.5 h-3.5" /> Suggested Savings
+                        </span>
+                        <span className="text-3xl font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">
+                          -${latestResult.service === 'lambda' 
+                            ? latestResult.suggestedSavings.toFixed(6) 
+                            : latestResult.service === 's3'
+                            ? latestResult.suggestedSavings.toFixed(4)
+                            : latestResult.suggestedSavings.toFixed(2)}
+                        </span>
+                        <span className="text-[10px] text-emerald-600/70 dark:text-emerald-500 font-medium">Optimization strategy savings</span>
+                      </div>
 
-                  {/* Estimated Annual Cost */}
-                  <div className="p-5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 rounded-xl flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Estimated Annual Runrate</span>
-                    <span className="text-3xl font-extrabold text-zinc-900 dark:text-white font-mono">
-                      ${latestResult.service === 'lambda' 
-                        ? latestResult.estimatedAnnualCost.toFixed(6) 
-                        : latestResult.service === 's3'
-                        ? latestResult.estimatedAnnualCost.toFixed(4)
-                        : latestResult.estimatedAnnualCost.toFixed(2)}
-                    </span>
-                    <span className="text-[10px] text-zinc-400 dark:text-zinc-500">Forecasted multiplier (x12)</span>
-                  </div>
-                </div>
+                      {/* Estimated Annual Cost */}
+                      <div className="p-5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 rounded-xl flex flex-col gap-1.5">
+                        <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-550 uppercase tracking-wider">Estimated Annual Runrate</span>
+                        <span className="text-3xl font-extrabold text-zinc-900 dark:text-white font-mono">
+                          ${latestResult.service === 'lambda' 
+                            ? latestResult.estimatedAnnualCost.toFixed(6) 
+                            : latestResult.service === 's3'
+                            ? latestResult.estimatedAnnualCost.toFixed(4)
+                            : latestResult.estimatedAnnualCost.toFixed(2)}
+                        </span>
+                        <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-medium">Forecasted multiplier (x12)</span>
+                      </div>
+                    </div>
 
-                {/* Savings recommendations report */}
-                <div className="mt-6 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/20 flex gap-3.5 items-start">
-                  <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/20 text-amber-500 border border-amber-100 dark:border-amber-900/30 flex-shrink-0 mt-0.5">
-                    <Info className="w-4 h-4" />
-                  </div>
-                  <div className="text-xs space-y-1.5">
-                    <p className="font-semibold text-zinc-900 dark:text-white">CloudInsight Optimization Recommendations:</p>
-                    
-                    {(!latestResult.service || latestResult.service === 'ec2') && (
-                      <ul className="list-disc pl-4 text-zinc-500 dark:text-zinc-400 space-y-1">
-                        <li>
-                          Switching to <span className="font-semibold text-zinc-800 dark:text-zinc-300">t3.micro</span> could yield a savings of <span className="font-semibold text-emerald-500 font-mono">10%</span> over t2.micro, with better burst CPU capabilities.
-                        </li>
-                        <li>
-                          For constant workloads, commit to an AWS Compute Savings Plan to reduce EC2 overhead by up to <span className="font-semibold text-emerald-500 font-mono">30%</span> (estimated savings of <span className="font-semibold font-mono">${latestResult.suggestedSavings.toFixed(2)}/mo</span>).
-                        </li>
-                      </ul>
-                    )}
+                    {/* Savings recommendations report */}
+                    <div className="mt-6 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/20 flex gap-3.5 items-start">
+                      <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/20 text-amber-500 border border-amber-100 dark:border-amber-900/30 flex-shrink-0 mt-0.5">
+                        <Info className="w-4 h-4" />
+                      </div>
+                      <div className="text-xs space-y-1.5">
+                        <p className="font-semibold text-zinc-900 dark:text-white">CloudInsight Optimization Recommendations:</p>
+                        
+                        {(!latestResult.service || latestResult.service === 'ec2') && (
+                          <ul className="list-disc pl-4 text-zinc-500 dark:text-zinc-400 space-y-1">
+                            <li>
+                              Switching to <span className="font-semibold text-zinc-800 dark:text-zinc-300">t3.micro</span> could yield a savings of <span className="font-semibold text-emerald-500 font-mono">10%</span> over t2.micro, with better burst CPU capabilities.
+                            </li>
+                            <li>
+                              For constant workloads, commit to an AWS Compute Savings Plan to reduce EC2 overhead by up to <span className="font-semibold text-emerald-500 font-mono">30%</span> (estimated savings of <span className="font-semibold font-mono">${latestResult.suggestedSavings.toFixed(2)}/mo</span>).
+                            </li>
+                          </ul>
+                        )}
 
-                    {latestResult.service === 's3' && (
-                      <ul className="list-disc pl-4 text-zinc-500 dark:text-zinc-400 space-y-1">
-                        <li>
-                          Enable <span className="font-semibold text-zinc-800 dark:text-zinc-300">S3 Lifecycle Rules</span> to automatically transition aging files to Glacier Deep Archive, yielding up to <span className="font-semibold text-emerald-500 font-mono">75%</span> cost reduction.
-                        </li>
-                        <li>
-                          Identify and abort incomplete multipart uploads to prevent garbage data overhead charges.
-                        </li>
-                      </ul>
-                    )}
+                        {latestResult.service === 's3' && (
+                          <ul className="list-disc pl-4 text-zinc-500 dark:text-zinc-400 space-y-1">
+                            <li>
+                              Enable <span className="font-semibold text-zinc-800 dark:text-zinc-300">S3 Lifecycle Rules</span> to automatically transition aging files to Glacier Deep Archive, yielding up to <span className="font-semibold text-emerald-500 font-mono">75%</span> cost reduction.
+                            </li>
+                            <li>
+                              Identify and abort incomplete multipart uploads to prevent garbage data overhead charges.
+                            </li>
+                          </ul>
+                        )}
 
-                    {latestResult.service === 'lambda' && (
-                      <ul className="list-disc pl-4 text-zinc-500 dark:text-zinc-400 space-y-1">
-                        <li>
-                          Deploy functions to <span className="font-semibold text-zinc-800 dark:text-zinc-300">AWS Graviton2 (ARM64)</span> processors to reduce execution charge rates by up to <span className="font-semibold text-emerald-500 font-mono">20%</span>.
-                        </li>
-                        <li>
-                          Verify execution duration traces. Right-sizing RAM configuration prevents expensive runtime durations.
-                        </li>
-                      </ul>
-                    )}
+                        {latestResult.service === 'lambda' && (
+                          <ul className="list-disc pl-4 text-zinc-500 dark:text-zinc-400 space-y-1">
+                            <li>
+                              Deploy functions to <span className="font-semibold text-zinc-800 dark:text-zinc-300">AWS Graviton2 (ARM64)</span> processors to reduce execution charge rates by up to <span className="font-semibold text-emerald-500 font-mono">20%</span>.
+                            </li>
+                            <li>
+                              Verify execution duration traces. Right-sizing RAM configuration prevents expensive runtime durations.
+                            </li>
+                          </ul>
+                        )}
 
-                    {['ec2', 's3', 'lambda'].indexOf(latestResult.service || 'ec2') === -1 && (
-                      <ul className="list-disc pl-4 text-zinc-500 dark:text-zinc-400 space-y-1">
-                        <li>
-                          Consolidate unused resources. Turn off development or testing nodes of <span className="font-semibold text-zinc-800 dark:text-zinc-300">{latestResult.service?.toUpperCase()}</span> during off-peak hours.
-                        </li>
-                        <li>
-                          Review cloud metrics dynamically to detect high scaling parameters or resource bottlenecks.
-                        </li>
-                      </ul>
-                    )}
-                  </div>
-                </div>
+                        {['ec2', 's3', 'lambda'].indexOf(latestResult.service || 'ec2') === -1 && (
+                          <ul className="list-disc pl-4 text-zinc-500 dark:text-zinc-400 space-y-1">
+                            <li>
+                              Consolidate unused resources. Turn off development or testing nodes of <span className="font-semibold text-zinc-800 dark:text-zinc-300">{latestResult.service?.toUpperCase()}</span> during off-peak hours.
+                            </li>
+                            <li>
+                              Review cloud metrics dynamically to detect high scaling parameters or resource bottlenecks.
+                            </li>
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
               </ResultCard>
 
               {/* Estimation History Table */}
@@ -886,11 +1104,13 @@ export const CostEstimatorView: React.FC<CostEstimatorViewProps> = ({
                         </div>
                         <div className="text-right">
                           <span className="font-bold text-zinc-900 dark:text-white block font-mono">
-                            ${est.service === 'lambda' 
-                              ? est.estimatedMonthlyCost.toFixed(6) 
-                              : est.service === 's3'
-                              ? est.estimatedMonthlyCost.toFixed(4)
-                              : est.estimatedMonthlyCost.toFixed(2)}/mo
+                            {est.supported === false 
+                              ? 'Unsupported' 
+                              : `$${est.service === 'lambda' 
+                                  ? est.estimatedMonthlyCost.toFixed(6) 
+                                  : est.service === 's3'
+                                  ? est.estimatedMonthlyCost.toFixed(4)
+                                  : est.estimatedMonthlyCost.toFixed(2)}/mo`}
                           </span>
                           <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono">
                             {new Date(est.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

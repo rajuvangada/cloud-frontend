@@ -30,6 +30,8 @@ export interface CostEstimationResult {
   storageGB?: number;
   requests?: number;
   gbSeconds?: number;
+  supported?: boolean;
+  message?: string;
 }
 
 export interface LogAnalysisResult {
