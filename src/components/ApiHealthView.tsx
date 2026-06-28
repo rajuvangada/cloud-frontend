@@ -1,10 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { checkApiHealth, apiConfig } from '../utils/api';
+import { apiConfig, fetchHealthStatus, fetchHealthHistory, fetchHealthMetrics, pingHealth } from '../utils/api';
 import { Activity, ShieldCheck, RefreshCw, Server, Send, AlertTriangle } from 'lucide-react';
 
 interface ApiHealthViewProps {
   onAddToast: (message: string, type: 'success' | 'error' | 'warning' | 'info') => void;
 }
+
+const ENDPOINT_DESCRIPTIONS: Record<string, { method: string, description: string }> = {
+  '/services': { method: 'GET', description: 'AWS Services Catalog' },
+  '/cost': { method: 'POST', description: 'AWS Lambda Estimator' },
+  '/logs': { method: 'POST', description: 'AWS Lambda Diagnostics' },
+  '/cost-history': { method: 'GET', description: 'MongoDB Cost Analytics' },
+  '/log-history': { method: 'GET', description: 'MongoDB Log Analytics' }
+};
 
 export const ApiHealthView: React.FC<ApiHealthViewProps> = ({ onAddToast }) => {
   const [loading, setLoading] = useState(false);
@@ -12,27 +20,87 @@ export const ApiHealthView: React.FC<ApiHealthViewProps> = ({ onAddToast }) => {
   const [lastChecked, setLastChecked] = useState<string>(new Date().toLocaleTimeString());
   const [gatewayStatus, setGatewayStatus] = useState<'online' | 'degraded' | 'offline'>('online');
   const [avgLatency, setAvgLatency] = useState<number>(50);
+  const [routeChecks, setRouteChecks] = useState<any[]>([
+    { endpoint: '/services', method: 'GET', success: true, status: 200, description: 'AWS Services Catalog' },
+    { endpoint: '/cost', method: 'POST', success: true, status: 200, description: 'AWS Lambda Estimator' },
+    { endpoint: '/logs', method: 'POST', success: true, status: 200, description: 'AWS Lambda Diagnostics' },
+    { endpoint: '/cost-history', method: 'GET', success: true, status: 200, description: 'MongoDB Cost Analytics' },
+    { endpoint: '/log-history', method: 'GET', success: true, status: 200, description: 'MongoDB Log Analytics' }
+  ]);
+
+  const updateStatusFromData = (status: 'online' | 'degraded' | 'offline', checks: any[], metrics?: any) => {
+    setGatewayStatus(status);
+    
+    if (checks && checks.length > 0) {
+      const updatedChecks = checks.map(c => {
+        const info = ENDPOINT_DESCRIPTIONS[c.endpoint] || { method: 'GET', description: 'API Route' };
+        return {
+          endpoint: c.endpoint,
+          method: info.method,
+          description: info.description,
+          success: c.success,
+          status: c.status
+        };
+      });
+      setRouteChecks(updatedChecks);
+    }
+    
+    if (metrics) {
+      setAvgLatency(metrics.avg_latency || 50);
+      if (metrics.last_check_timestamp) {
+        setLastChecked(new Date(metrics.last_check_timestamp).toLocaleTimeString());
+      }
+    } else {
+      setLastChecked(new Date().toLocaleTimeString());
+    }
+  };
+
+  const refreshHealthData = async () => {
+    try {
+      const statusRes = await fetchHealthStatus();
+      const historyRes = await fetchHealthHistory();
+      const metricsRes = await fetchHealthMetrics();
+      
+      if (historyRes.history) {
+        setLatencyHistory(historyRes.history);
+      }
+      
+      updateStatusFromData(statusRes.status, statusRes.checks, metricsRes);
+    } catch (err) {
+      console.error('Failed to load health statistics:', err);
+    }
+  };
 
   useEffect(() => {
-    if (latencyHistory.length > 0) {
-      const avg = Math.round(latencyHistory.reduce((a, b) => a + b, 0) / latencyHistory.length);
-      setAvgLatency(avg);
-    }
-  }, [latencyHistory]);
+    refreshHealthData();
+    
+    // Auto-polling interval every 15 seconds
+    const interval = setInterval(() => {
+      refreshHealthData();
+    }, 15000);
+    
+    return () => clearInterval(interval);
+  }, []);
 
   const handlePing = async () => {
     setLoading(true);
     try {
-      const { ok, latency } = await checkApiHealth();
-      setLastChecked(new Date().toLocaleTimeString());
+      const res = await pingHealth();
+      const historyRes = await fetchHealthHistory();
+      const metricsRes = await fetchHealthMetrics();
       
-      if (ok) {
-        setLatencyHistory((prev) => [...prev.slice(-14), latency]); // Keep last 15 points
-        setGatewayStatus('online');
-        onAddToast(`Ping successful! Roundtrip latency: ${latency}ms`, 'success');
+      if (historyRes.history) {
+        setLatencyHistory(historyRes.history);
+      }
+      
+      updateStatusFromData(res.status, res.checks, metricsRes);
+      
+      if (res.status === 'online') {
+        onAddToast(`All gateway endpoints operational! Roundtrip check completed.`, 'success');
+      } else if (res.status === 'degraded') {
+        onAddToast('Performance degraded. Some serverless route checks failed.', 'warning');
       } else {
-        setGatewayStatus('degraded');
-        onAddToast('Gateway response returned an invalid status code.', 'warning');
+        onAddToast('Gateway unreachable. All target routes failing.', 'error');
       }
     } catch (err) {
       setGatewayStatus('offline');
@@ -195,27 +263,25 @@ export const ApiHealthView: React.FC<ApiHealthViewProps> = ({ onAddToast }) => {
           <div>
             <h3 className="text-sm font-semibold text-zinc-900 dark:text-white mb-4">Serverless Route Checks</h3>
             <div className="space-y-3">
-              {/* Cost API endpoint */}
-              <div className="p-3 border border-zinc-100 dark:border-zinc-800 rounded-lg bg-zinc-50/20 dark:bg-zinc-950/20 flex items-center justify-between">
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">POST /cost</span>
-                  <span className="text-[10px] text-zinc-400 dark:text-zinc-500">AWS Lambda Estimator</span>
+              {routeChecks.map((ep) => (
+                <div key={ep.endpoint} className="p-3 border border-zinc-100 dark:border-zinc-800 rounded-lg bg-zinc-50/20 dark:bg-zinc-950/20 flex items-center justify-between">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                      {ep.method} {ep.endpoint}
+                    </span>
+                    <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
+                      {ep.description}
+                    </span>
+                  </div>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                    ep.success
+                      ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/30'
+                      : 'text-rose-500 bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/30'
+                  }`}>
+                    {ep.success ? `${ep.status || 200} OK` : ep.status ? `${ep.status} Error` : 'Offline'}
+                  </span>
                 </div>
-                <span className="text-[10px] font-bold text-emerald-500 px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/30">
-                  200 OK
-                </span>
-              </div>
-
-              {/* Logs API endpoint */}
-              <div className="p-3 border border-zinc-100 dark:border-zinc-800 rounded-lg bg-zinc-50/20 dark:bg-zinc-950/20 flex items-center justify-between">
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">POST /logs</span>
-                  <span className="text-[10px] text-zinc-400 dark:text-zinc-500">AWS Lambda Diagnostics</span>
-                </div>
-                <span className="text-[10px] font-bold text-emerald-500 px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/30">
-                  200 OK
-                </span>
-              </div>
+              ))}
 
               {/* API Gateway region info */}
               <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800 text-[11px] text-zinc-500 dark:text-zinc-400 space-y-1.5 leading-relaxed">

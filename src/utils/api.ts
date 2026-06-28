@@ -1,4 +1,4 @@
-import type { CostRequest, CostResponse, LogRequest, LogResponse, CostEstimationResult, LogAnalysisResult, User, CostHistory, LogHistory } from '../types';
+import type { CostRequest, CostResponse, LogRequest, CostEstimationResult, LogAnalysisResult, User, CostHistory, LogHistory } from '../types';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://q2rl2hl6y3.execute-api.us-east-1.amazonaws.com/prod';
 
@@ -290,13 +290,16 @@ export const analyzeLog = async (
       throw new Error(`HTTP error! Status: ${response.status}`);
     }
 
-    const data: LogResponse = await response.json();
-    const details = parseBackendAnalysis(data.analysis);
+    const data: any = await response.json();
+    const details = parseBackendAnalysis(data.analysis || '');
     const result: LogAnalysisResult = {
       id: `log-${Math.random().toString(36).substr(2, 9)}`,
       timestamp: new Date().toISOString(),
       logPreview: logText.substring(0, 150) + (logText.length > 150 ? '...' : ''),
-      ...details,
+      issueType: data.issue || details.issueType,
+      severity: data.severity || details.severity,
+      possibleCauses: data.possible_causes || details.possibleCauses,
+      recommendations: data.recommended_actions || details.recommendations,
       isMocked: false,
     };
     return { result, latency: Math.round(performance.now() - startTime) };
@@ -325,18 +328,16 @@ export const checkApiHealth = async (): Promise<{ ok: boolean; latency: number }
     return { ok: true, latency: Math.round(performance.now() - startTime) };
   }
   try {
-    // Send a cost estimate request with 0 hours as a lightweight ping
-    const payload: CostRequest = { hours: 0, instanceType: 't2.micro' };
-    const response = await fetch(getUrl('/cost'), {
-      method: 'POST',
+    const response = await fetch(getUrl('/health'), {
+      method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(4000) // 4s timeout
     });
+    const data = await response.json();
     return {
-      ok: response.status === 200,
+      ok: response.status === 200 && data.status !== 'offline',
       latency: Math.round(performance.now() - startTime)
     };
   } catch (err) {
@@ -344,6 +345,123 @@ export const checkApiHealth = async (): Promise<{ ok: boolean; latency: number }
       ok: false,
       latency: Math.round(performance.now() - startTime)
     };
+  }
+};
+
+export const fetchHealthStatus = async (): Promise<{ status: 'online' | 'degraded' | 'offline'; checks: any[] }> => {
+  if (useMock) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return {
+      status: 'online',
+      checks: [
+        { endpoint: '/services', method: 'GET', success: true, status: 200, failures: [], possible_causes: ['Endpoint is operational.'], recommended_actions: ['No action required.'] },
+        { endpoint: '/cost', method: 'POST', success: true, status: 200, failures: [], possible_causes: ['Endpoint is operational.'], recommended_actions: ['No action required.'] },
+        { endpoint: '/logs', method: 'POST', success: true, status: 200, failures: [], possible_causes: ['Endpoint is operational.'], recommended_actions: ['No action required.'] },
+        { endpoint: '/cost-history', method: 'GET', success: true, status: 200, failures: [], possible_causes: ['Endpoint is operational.'], recommended_actions: ['No action required.'] },
+        { endpoint: '/log-history', method: 'GET', success: true, status: 200, failures: [], possible_causes: ['Endpoint is operational.'], recommended_actions: ['No action required.'] }
+      ]
+    };
+  }
+  try {
+    const response = await fetch(getUrl('/health'), {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(5000)
+    });
+    return await response.json();
+  } catch (err) {
+    console.error('Failed to fetch health status:', err);
+    return { status: 'offline', checks: [] };
+  }
+};
+
+export const fetchHealthHistory = async (): Promise<{ history: number[] }> => {
+  if (useMock) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    return { history: [45, 52, 48, 62, 50, 42, 48, 55, 47, 51] };
+  }
+  try {
+    const response = await fetch(getUrl('/health/history'), {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(5000)
+    });
+    return await response.json();
+  } catch (err) {
+    console.error('Failed to fetch health history:', err);
+    return { history: [45, 52, 48, 62, 50, 42, 48, 55, 47, 51] };
+  }
+};
+
+export const fetchHealthMetrics = async (): Promise<{
+  current_latency: number;
+  avg_latency: number;
+  min_latency: number;
+  max_latency: number;
+  p95_latency: number;
+  uptime_pct: number;
+  success_rate: number;
+  last_check_timestamp: string | null;
+}> => {
+  if (useMock) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return {
+      current_latency: 50,
+      avg_latency: 48,
+      min_latency: 40,
+      max_latency: 65,
+      p95_latency: 60,
+      uptime_pct: 100,
+      success_rate: 100,
+      last_check_timestamp: new Date().toISOString()
+    };
+  }
+  try {
+    const response = await fetch(getUrl('/health/metrics'), {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(5000)
+    });
+    return await response.json();
+  } catch (err) {
+    console.error('Failed to fetch health metrics:', err);
+    return {
+      current_latency: 0,
+      avg_latency: 0,
+      min_latency: 0,
+      max_latency: 0,
+      p95_latency: 0,
+      uptime_pct: 100,
+      success_rate: 100,
+      last_check_timestamp: null
+    };
+  }
+};
+
+export const pingHealth = async (): Promise<{ status: 'online' | 'degraded' | 'offline'; checks: any[] }> => {
+  if (useMock) {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    return {
+      status: 'online',
+      checks: [
+        { endpoint: '/services', method: 'GET', success: true, status: 200, failures: [], possible_causes: ['Endpoint is operational.'], recommended_actions: ['No action required.'] },
+        { endpoint: '/cost', method: 'POST', success: true, status: 200, failures: [], possible_causes: ['Endpoint is operational.'], recommended_actions: ['No action required.'] },
+        { endpoint: '/logs', method: 'POST', success: true, status: 200, failures: [], possible_causes: ['Endpoint is operational.'], recommended_actions: ['No action required.'] },
+        { endpoint: '/cost-history', method: 'GET', success: true, status: 200, failures: [], possible_causes: ['Endpoint is operational.'], recommended_actions: ['No action required.'] },
+        { endpoint: '/log-history', method: 'GET', success: true, status: 200, failures: [], possible_causes: ['Endpoint is operational.'], recommended_actions: ['No action required.'] }
+      ]
+    };
+  }
+  try {
+    const response = await fetch(getUrl('/health/ping'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(10000) // Allow 10s for parallel checks
+    });
+    return await response.json();
+  } catch (err) {
+    console.error('Failed to run health ping:', err);
+    return { status: 'offline', checks: [] };
   }
 };
 

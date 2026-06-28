@@ -71,7 +71,10 @@ export const App: React.FC = () => {
           id: item._id,
           timestamp: item.timestamp,
           logPreview: item.log ? (item.log.substring(0, 150) + (item.log.length > 150 ? '...' : '')) : '',
-          ...details,
+          issueType: (item as any).issue || details.issueType,
+          severity: (item as any).severity || details.severity,
+          possibleCauses: (item as any).possible_causes || details.possibleCauses,
+          recommendations: (item as any).recommended_actions || details.recommendations,
           isMocked: false
         };
       });
@@ -129,21 +132,31 @@ export const App: React.FC = () => {
     // Check credentials on load
     const savedToken = localStorage.getItem('token');
     const savedUserStr = localStorage.getItem('user');
+
+    const initialHash = window.location.hash.replace('#', '') as ViewType;
+    const validViews: ViewType[] = ['landing', 'login', 'register', 'forgot', 'dashboard', 'cost', 'logs', 'api', 'settings'];
+    const hasValidInitialHash = validViews.includes(initialHash);
+
     if (savedToken && savedUserStr) {
       try {
         const savedUser = JSON.parse(savedUserStr);
         setCurrentUser(savedUser);
         setIsAuthenticated(true);
-        setCurrentView('dashboard');
+
+        if (hasValidInitialHash && !['login', 'register', 'forgot'].includes(initialHash)) {
+          setCurrentView(initialHash);
+        } else {
+          setCurrentView('dashboard');
+        }
         // Retrieve live histories from MongoDB
         loadDatabaseHistory();
       } catch (e) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
-        setCurrentView('landing');
+        setCurrentView(hasValidInitialHash ? initialHash : 'landing');
       }
     } else {
-      setCurrentView('landing');
+      setCurrentView(hasValidInitialHash ? initialHash : 'landing');
     }
 
     // Auto-minimize sidebar on smaller screens initially
@@ -151,16 +164,18 @@ export const App: React.FC = () => {
       setSidebarOpen(false);
     }
 
-    // Trigger API gateway ping health check on boot
-    const pingBoot = async () => {
+    // Trigger API gateway ping health check on boot and start 15s auto-polling
+    const runPing = async () => {
       try {
         const res = await checkApiHealth();
         setApiHealth(res);
       } catch (e) {
-        console.error('Failed to run boot API checks:', e);
+        console.error('Failed to run API checks:', e);
       }
     };
-    pingBoot();
+    runPing();
+    const healthInterval = setInterval(runPing, 15000);
+    return () => clearInterval(healthInterval);
   }, []);
 
   // 2. Route Protection Guard check
@@ -175,6 +190,26 @@ export const App: React.FC = () => {
       setCurrentView('dashboard');
     }
   }, [currentView, isAuthenticated]);
+
+  // Synchronize state with URL hash and listen to hashchange events
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#', '') as ViewType;
+      const validViews: ViewType[] = ['landing', 'login', 'register', 'forgot', 'dashboard', 'cost', 'logs', 'api', 'settings'];
+      if (validViews.includes(hash)) {
+        setCurrentView(hash);
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  useEffect(() => {
+    const currentHash = window.location.hash.replace('#', '');
+    if (currentHash !== currentView) {
+      window.location.hash = currentView;
+    }
+  }, [currentView]);
 
   // 3. Handlers
   const handleThemeToggle = () => {
@@ -250,6 +285,7 @@ export const App: React.FC = () => {
   const handleLoginSuccess = (user: User, _token: string) => {
     setCurrentUser(user);
     setIsAuthenticated(true);
+    window.history.replaceState(null, '', '#dashboard');
     setCurrentView('dashboard');
     loadDatabaseHistory(); // Load historic entries on success
   };
@@ -259,6 +295,7 @@ export const App: React.FC = () => {
     localStorage.removeItem('user');
     setIsAuthenticated(false);
     setCurrentUser(null);
+    window.history.replaceState(null, '', '#login');
     setCurrentView('login');
     addToast('Logged out successfully.', 'info');
   };
@@ -393,6 +430,7 @@ export const App: React.FC = () => {
           onSidebarToggle={handleSidebarToggle}
           currentUser={currentUser}
           onLogout={handleLogout}
+          onViewChange={setCurrentView}
         />
 
         {/* Dynamic page container content */}

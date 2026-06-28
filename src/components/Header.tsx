@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import type { ThemeType, User } from '../types';
+import type { ThemeType, User, ViewType } from '../types';
 import { Sun, Moon, Bell, Menu, User as UserIcon, LogOut, Settings, HelpCircle, ArrowRight } from 'lucide-react';
 
 interface HeaderProps {
@@ -8,6 +8,7 @@ interface HeaderProps {
   onSidebarToggle: () => void;
   currentUser: User | null;
   onLogout: () => void;
+  onViewChange: (view: ViewType) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -16,6 +17,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSidebarToggle,
   currentUser,
   onLogout,
+  onViewChange,
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
@@ -173,13 +175,31 @@ export const Header: React.FC<HeaderProps> = ({
                 <p className="text-[10px] text-zinc-400 dark:text-zinc-500 truncate">{currentUser?.email || 'developer@cloudinsight.io'}</p>
               </div>
               <div className="py-1">
-                <button className="w-full px-4 py-2.5 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 flex items-center gap-2.5 cursor-pointer">
+                <button
+                  onClick={() => {
+                    onViewChange('dashboard');
+                    setShowProfile(false);
+                  }}
+                  className="w-full px-4 py-2.5 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 flex items-center gap-2.5 cursor-pointer"
+                >
                   <UserIcon className="w-4 h-4" /> Personal Account
                 </button>
-                <button className="w-full px-4 py-2.5 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 flex items-center gap-2.5 cursor-pointer">
+                <button
+                  onClick={() => {
+                    onViewChange('settings');
+                    setShowProfile(false);
+                  }}
+                  className="w-full px-4 py-2.5 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 flex items-center gap-2.5 cursor-pointer"
+                >
                   <Settings className="w-4 h-4" /> Settings
                 </button>
-                <button className="w-full px-4 py-2.5 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 flex items-center gap-2.5 cursor-pointer">
+                <button
+                  onClick={() => {
+                    window.location.href = 'mailto:support@cloudinsight.io';
+                    setShowProfile(false);
+                  }}
+                  className="w-full px-4 py-2.5 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 flex items-center gap-2.5 cursor-pointer"
+                >
                   <HelpCircle className="w-4 h-4" /> Help Support
                 </button>
               </div>

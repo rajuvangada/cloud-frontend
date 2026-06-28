@@ -116,6 +116,24 @@ export const LogAnalyzerView: React.FC<LogAnalyzerViewProps> = ({
     analyses.length > 0 ? analyses[0] : null
   );
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result;
+      if (typeof text === 'string') {
+        setLogText(text);
+        onAddToast(`Loaded file: ${file.name}`, 'success');
+      }
+    };
+    reader.onerror = () => {
+      onAddToast('Failed to read file.', 'error');
+    };
+    reader.readAsText(file);
+  };
+
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!logText.trim()) {
@@ -174,9 +192,20 @@ export const LogAnalyzerView: React.FC<LogAnalyzerViewProps> = ({
           </h3>
           <form onSubmit={handleAnalyze} className="space-y-4">
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="log-input" className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-                Log Text
-              </label>
+              <div className="flex justify-between items-center">
+                <label htmlFor="log-input" className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+                  Log Text
+                </label>
+                <label className="text-[10px] text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-white font-semibold cursor-pointer hover:underline">
+                  Upload File (.log, .txt, .json)
+                  <input
+                    type="file"
+                    accept=".log,.txt,.json"
+                    className="hidden"
+                    onChange={handleFileUpload}
+                  />
+                </label>
+              </div>
               <textarea
                 id="log-input"
                 rows={10}

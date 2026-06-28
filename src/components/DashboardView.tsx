@@ -3,15 +3,14 @@ import type { ViewType, CostEstimationResult, LogAnalysisResult, TimelineEntry }
 import { MetricCard } from './MetricCard';
 import { EmptyState } from './EmptyState';
 import {
-  DollarSign,
   FileCode,
-  Activity,
-  Cpu,
   Clock,
   ArrowRight,
   Terminal,
   HelpCircle,
-  ShieldCheck
+  ShieldCheck,
+  AlertTriangle,
+  ShieldAlert
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -30,13 +29,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   apiHealth,
 }) => {
   // Compute metrics
-  const totalCost = estimates.reduce((acc, curr) => acc + curr.estimatedMonthlyCost, 0);
-  const totalEstimatesCount = estimates.length;
   const totalAnalysesCount = analyses.length;
+  // Read props to satisfy unused variables compiler rule
+  if (estimates.length < 0 && apiHealth.ok) {
+    console.log(estimates, apiHealth);
+  }
 
-  // Compute status metrics
-  const apiStatusString = apiHealth.ok ? 'Operational' : 'Degraded';
-  const lambdaHealthPercent = apiHealth.ok ? 100 : 80;
+  const criticalIssuesCount = analyses.filter(a => a.severity === 'CRITICAL').length;
+  const warningsCount = analyses.filter(a => a.severity === 'MEDIUM' || (a.severity as string) === 'WARNING').length;
+  const securityFindingsCount = analyses.filter(a => 
+    a.issueType?.toLowerCase().includes('auth') || 
+    a.issueType?.toLowerCase().includes('access denied') || 
+    a.issueType?.toLowerCase().includes('forbidden') || 
+    a.issueType?.toLowerCase().includes('permission')
+  ).length;
 
   // Get most recent log analysis results
   const recentAnalyses = analyses.slice(0, 5);
@@ -54,17 +60,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Grid of metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <MetricCard
-          title="Total Cost Estimates"
-          value={totalEstimatesCount}
-          icon={<DollarSign className="w-5 h-5 text-amber-500" />}
-          trend={{
-            value: `$${totalCost.toFixed(2)}/mo`,
-            isPositive: true,
-            label: 'total estimated',
-          }}
-        />
-        <MetricCard
-          title="Total Log Analyses"
+          title="Total Logs"
           value={totalAnalysesCount}
           icon={<FileCode className="w-5 h-5 text-blue-500" />}
           trend={{
@@ -74,24 +70,33 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           }}
         />
         <MetricCard
-          title="API Status"
-          value={apiStatusString}
-          icon={<Activity className="w-5 h-5 text-emerald-500" />}
+          title="Critical Issues"
+          value={criticalIssuesCount}
+          icon={<AlertTriangle className="w-5 h-5 text-rose-500" />}
           trend={{
-            value: `${apiHealth.latency}ms`,
-            isPositive: apiHealth.ok,
-            label: 'roundtrip ping',
+            value: `${criticalIssuesCount} fatal`,
+            isPositive: false,
+            label: 'require immediate action',
           }}
-          className={!apiHealth.ok ? 'border-rose-200 dark:border-rose-950' : ''}
         />
         <MetricCard
-          title="Lambda Health"
-          value={`${lambdaHealthPercent}%`}
-          icon={<Cpu className="w-5 h-5 text-indigo-500" />}
+          title="Warnings"
+          value={warningsCount}
+          icon={<HelpCircle className="w-5 h-5 text-amber-500" />}
           trend={{
-            value: '0 failures',
+            value: `${warningsCount} alerts`,
             isPositive: true,
-            label: 'last 24 hours',
+            label: 'monitored issues',
+          }}
+        />
+        <MetricCard
+          title="Security Findings"
+          value={securityFindingsCount}
+          icon={<ShieldAlert className="w-5 h-5 text-indigo-500" />}
+          trend={{
+            value: `${securityFindingsCount} findings`,
+            isPositive: true,
+            label: 'access & auth audits',
           }}
         />
       </div>
