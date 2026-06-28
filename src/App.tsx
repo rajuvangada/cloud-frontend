@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import type { ViewType, ThemeType, CostEstimationResult, LogAnalysisResult, TimelineEntry, Toast, User } from './types';
+import type { ViewType, ThemeType, CostEstimationResult, LogAnalysisResult, TimelineEntry, Toast, User, CostHistory, LogHistory } from './types';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { ToastContainer } from './components/ToastMessage';
@@ -12,7 +12,7 @@ import { LandingPage } from './components/LandingPage';
 import { LoginPage } from './components/LoginPage';
 import { RegisterPage } from './components/RegisterPage';
 import { ForgotPasswordPage } from './components/ForgotPasswordPage';
-import { getMockEstimates, getMockAnalyses, getMockTimeline, checkApiHealth } from './utils/api';
+import { checkApiHealth, fetchCostHistory, fetchLogHistory, parseBackendAnalysis } from './utils/api';
 
 export const App: React.FC = () => {
   // Navigation & layout states
@@ -27,11 +27,86 @@ export const App: React.FC = () => {
   // Global history states
   const [estimates, setEstimates] = useState<CostEstimationResult[]>([]);
   const [analyses, setAnalyses] = useState<LogAnalysisResult[]>([]);
+  const [costHistory, setCostHistory] = useState<CostHistory[]>([]);
+  const [logHistory, setLogHistory] = useState<LogHistory[]>([]);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   
   // Real-time backend API states
   const [apiHealth, setApiHealth] = useState<{ ok: boolean; latency: number }>({ ok: true, latency: 45 });
+
+  // Load database history from MongoDB
+  const loadDatabaseHistory = async () => {
+    try {
+      const costResult = await fetchCostHistory();
+      const logResult = await fetchLogHistory();
+
+      setCostHistory(costResult.data || []);
+      setLogHistory(logResult.data || []);
+
+      const costItems = Array.isArray(costResult.data) ? costResult.data : [];
+      const logItems = Array.isArray(logResult.data) ? logResult.data : [];
+
+      // Map CostHistory to CostEstimationResult so existing frontend continues working
+      const mappedEstimates: CostEstimationResult[] = (costItems || []).map((item: CostHistory) => {
+        const monthly = item.estimated_cost || 0;
+        return {
+          id: item._id,
+          timestamp: item.timestamp,
+          instanceType: item.resource || 'standard-resource',
+          hours: 720,
+          estimatedMonthlyCost: monthly,
+          estimatedAnnualCost: Number((monthly * 12).toFixed(2)),
+          suggestedSavings: Number((monthly * 0.3).toFixed(2)),
+          isMocked: false,
+          service: item.service
+        };
+      });
+
+      // Map LogHistory to LogAnalysisResult
+      const mappedAnalyses: LogAnalysisResult[] = (logItems || []).map((item: LogHistory) => {
+        const analysisText = item.analysis || '';
+        const details = parseBackendAnalysis(analysisText);
+        return {
+          id: item._id,
+          timestamp: item.timestamp,
+          logPreview: item.log ? (item.log.substring(0, 150) + (item.log.length > 150 ? '...' : '')) : '',
+          ...details,
+          isMocked: false
+        };
+      });
+
+      setEstimates(mappedEstimates);
+      setAnalyses(mappedAnalyses);
+      
+      const costTimeline: TimelineEntry[] = (mappedEstimates || []).map((item) => ({
+        id: `act-${item.id}`,
+        type: 'cost',
+        title: `Cost Estimation: ${item.instanceType}`,
+        subtitle: `720 hours estimate calculated`,
+        timestamp: item.timestamp,
+        status: 'success',
+        amount: item.estimatedMonthlyCost,
+      }));
+      
+      const logTimeline: TimelineEntry[] = (mappedAnalyses || []).map((item) => ({
+        id: `act-${item.id}`,
+        type: 'log',
+        title: `Log Analysis: ${item.issueType}`,
+        subtitle: `${item.severity} severity diagnostics completed`,
+        timestamp: item.timestamp,
+        status: 'success',
+        severity: item.severity,
+      }));
+      
+      const combined = [...costTimeline, ...logTimeline].sort(
+        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+      setTimeline(combined);
+    } catch (error) {
+      console.error("History API Error:", error);
+    }
+  };
 
   // 1. Initialize data, auth status & theme
   useEffect(() => {
@@ -54,6 +129,8 @@ export const App: React.FC = () => {
         setCurrentUser(savedUser);
         setIsAuthenticated(true);
         setCurrentView('dashboard');
+        // Retrieve live histories from MongoDB
+        loadDatabaseHistory();
       } catch (e) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
@@ -62,11 +139,6 @@ export const App: React.FC = () => {
     } else {
       setCurrentView('landing');
     }
-
-    // Prepopulate dashboard with rich sample data on first load
-    setEstimates(getMockEstimates());
-    setAnalyses(getMockAnalyses());
-    setTimeline(getMockTimeline());
 
     // Auto-minimize sidebar on smaller screens initially
     if (window.innerWidth < 1024) {
@@ -86,7 +158,6 @@ export const App: React.FC = () => {
   }, []);
 
   // 2. Route Protection Guard check
-  // Intercept views: if unauthenticated user attempts to view dashboard pages, redirect to login.
   const authProtectedViews: ViewType[] = ['dashboard', 'cost', 'logs', 'api', 'settings'];
   const guestOnlyViews: ViewType[] = ['login', 'register', 'forgot'];
 
@@ -130,7 +201,7 @@ export const App: React.FC = () => {
     
     // Add to activity timeline
     const entry: TimelineEntry = {
-      id: `act-${Math.random().toString(36).substr(2, 9)}`,
+      id: `act-${result.id}`,
       type: 'cost',
       title: `Cost Estimation: ${result.instanceType}`,
       subtitle: `${result.hours} hours estimate calculated`,
@@ -139,6 +210,9 @@ export const App: React.FC = () => {
       amount: result.estimatedMonthlyCost,
     };
     setTimeline((prev) => [entry, ...prev]);
+    
+    // Trigger Database re-fetch to sync cost history items
+    loadDatabaseHistory();
   };
 
   const handleAddAnalysis = (result: LogAnalysisResult) => {
@@ -146,7 +220,7 @@ export const App: React.FC = () => {
 
     // Add to activity timeline
     const entry: TimelineEntry = {
-      id: `act-${Math.random().toString(36).substr(2, 9)}`,
+      id: `act-${result.id}`,
       type: 'log',
       title: `Log Analysis: ${result.issueType}`,
       subtitle: `${result.severity} severity diagnostics completed`,
@@ -155,6 +229,9 @@ export const App: React.FC = () => {
       severity: result.severity,
     };
     setTimeline((prev) => [entry, ...prev]);
+
+    // Trigger Database re-fetch to sync log analyzer items
+    loadDatabaseHistory();
   };
 
   const handleClearHistory = () => {
@@ -168,6 +245,7 @@ export const App: React.FC = () => {
     setCurrentUser(user);
     setIsAuthenticated(true);
     setCurrentView('dashboard');
+    loadDatabaseHistory(); // Load historic entries on success
   };
 
   const handleLogout = () => {

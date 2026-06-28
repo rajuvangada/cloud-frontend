@@ -26,6 +26,10 @@ export interface CostEstimationResult {
   estimatedAnnualCost: number;
   suggestedSavings: number;
   isMocked?: boolean;
+  service?: 'ec2' | 's3' | 'lambda' | 'rds' | string;
+  storageGB?: number;
+  requests?: number;
+  gbSeconds?: number;
 }
 
 export interface LogAnalysisResult {
@@ -74,3 +78,18 @@ export interface User {
 export type ViewType = 'landing' | 'login' | 'register' | 'forgot' | 'dashboard' | 'cost' | 'logs' | 'api' | 'settings';
 
 export type ThemeType = 'light' | 'dark';
+
+export interface CostHistory {
+  _id: string;
+  service: string;
+  resource: string;
+  estimated_cost: number;
+  timestamp: string;
+}
+
+export interface LogHistory {
+  _id: string;
+  log: string;
+  analysis: string;
+  timestamp: string;
+}
