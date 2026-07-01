@@ -25,6 +25,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const menuItems = [
     { id: 'dashboard' as ViewType, name: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" /> },
+    { id: 'mycloud' as ViewType, name: 'My Cloud', icon: <Cloud className="w-5 h-5" /> },
     { id: 'cost' as ViewType, name: 'Cost Estimator', icon: <Calculator className="w-5 h-5" /> },
     { id: 'logs' as ViewType, name: 'Log Analyzer', icon: <Terminal className="w-5 h-5" /> },
     { id: 'api' as ViewType, name: 'API Health', icon: <Activity className="w-5 h-5" /> },

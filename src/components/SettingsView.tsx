@@ -19,6 +19,83 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [customUrl, setCustomUrl] = useState<string>(apiConfig.getCustomEndpoint());
   const [saving, setSaving] = useState(false);
 
+  const getInitialEnv = (url: string) => {
+    if (!url) return 'production';
+    if (url === 'http://localhost:5000') return 'development';
+    return 'custom';
+  };
+
+  const [apiEnv, setApiEnv] = useState<'production' | 'development' | 'custom'>(
+    getInitialEnv(apiConfig.getCustomEndpoint())
+  );
+
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    connected: boolean | null;
+    responseTime: number | null;
+    status: string | null;
+  }>({
+    connected: null,
+    responseTime: null,
+    status: null,
+  });
+
+  const handleTestConnection = async () => {
+    setTesting(true);
+    setTestResult({ connected: null, responseTime: null, status: null });
+
+    let targetUrl = '';
+    if (apiEnv === 'production') {
+      targetUrl = 'https://q2rl2hl6y3.execute-api.us-east-1.amazonaws.com/prod';
+    } else if (apiEnv === 'development') {
+      targetUrl = 'http://localhost:5000';
+    } else {
+      targetUrl = customUrl.trim();
+    }
+
+    const startTime = performance.now();
+    try {
+      if (mockMode) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        setTestResult({
+          connected: true,
+          responseTime: Math.round(performance.now() - startTime),
+          status: 'healthy'
+        });
+        onAddToast('Test connection successful (Mocked Mode active).', 'success');
+        return;
+      }
+
+      const response = await fetch(`${targetUrl}/health`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(5000)
+      });
+      const data = await response.json();
+      const latency = Math.round(performance.now() - startTime);
+      setTestResult({
+        connected: response.ok,
+        responseTime: latency,
+        status: data.status || 'healthy'
+      });
+      if (response.ok) {
+        onAddToast('Connected to the API gateway successfully.', 'success');
+      } else {
+        onAddToast('Connected to the gateway, but health check failed.', 'warning');
+      }
+    } catch (err) {
+      const latency = Math.round(performance.now() - startTime);
+      setTestResult({
+        connected: false,
+        responseTime: latency,
+        status: 'offline'
+      });
+      onAddToast('Failed to connect to the selected API gateway.', 'error');
+    } finally {
+      setTesting(false);
+    }
+  };
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -36,6 +113,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleResetSettings = () => {
     setMockMode(false);
     setCustomUrl('');
+    setApiEnv('production');
+    setTestResult({ connected: null, responseTime: null, status: null });
     apiConfig.setUseMock(false);
     apiConfig.setCustomEndpoint('');
     onAddToast('Settings restored to defaults.', 'info');
@@ -97,19 +176,48 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
             </div>
 
+            {/* API Environment Dropdown Selector */}
+            <div className="flex flex-col gap-2">
+              <label htmlFor="api-env-select" className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+                API Environment Selection
+              </label>
+              <select
+                id="api-env-select"
+                value={apiEnv}
+                onChange={(e) => {
+                  const val = e.target.value as 'production' | 'development' | 'custom';
+                  setApiEnv(val);
+                  if (val === 'production') {
+                    setCustomUrl('');
+                  } else if (val === 'development') {
+                    setCustomUrl('http://localhost:5000');
+                  }
+                }}
+                className="w-full text-sm rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-2.5 outline-hidden focus:ring-1 focus:ring-linear dark:focus:ring-aws text-zinc-900 dark:text-white transition-all"
+              >
+                <option value="production">Production API Gateway (AWS Cloud)</option>
+                <option value="development">Local Development API (http://localhost:5000)</option>
+                <option value="custom">Custom Endpoint Base URL</option>
+              </select>
+            </div>
+
             {/* Custom URL Endpoint */}
             <div className="flex flex-col gap-2">
               <div className="flex justify-between items-center">
                 <label htmlFor="custom-url" className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-                  Custom Base URL Override
+                  Base URL Override Input
                 </label>
-                {!customUrl ? (
+                {apiEnv === 'production' ? (
                   <span className="text-[10px] font-bold text-emerald-500 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/30 px-2 py-0.5 rounded-full">
                     Production Active
                   </span>
+                ) : apiEnv === 'development' ? (
+                  <span className="text-[10px] font-bold text-blue-500 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/30 px-2 py-0.5 rounded-full">
+                    Local Dev Active
+                  </span>
                 ) : (
                   <span className="text-[10px] font-bold text-amber-500 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/30 px-2 py-0.5 rounded-full">
-                    Custom Endpoint Override
+                    Custom Override Active
                   </span>
                 )}
               </div>
@@ -117,13 +225,65 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 id="custom-url"
                 type="url"
                 value={customUrl}
+                disabled={apiEnv !== 'custom'}
                 onChange={(e) => setCustomUrl(e.target.value)}
                 placeholder="https://q2rl2hl6y3.execute-api.us-east-1.amazonaws.com"
-                className="w-full text-sm font-mono rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-2.5 outline-hidden focus:ring-1 focus:ring-linear dark:focus:ring-aws text-zinc-900 dark:text-white transition-all"
+                className="w-full text-sm font-mono rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-2.5 outline-hidden focus:ring-1 focus:ring-linear dark:focus:ring-aws text-zinc-900 dark:text-white transition-all disabled:opacity-60 disabled:cursor-not-allowed"
               />
               <span className="text-[10px] text-zinc-400 dark:text-zinc-500 leading-normal">
-                Leave empty to run default AWS N.Virginia cloud: `https://q2rl2hl6y3.execute-api.us-east-1.amazonaws.com`
+                Active target endpoint: `{apiEnv === 'production' ? 'https://q2rl2hl6y3.execute-api.us-east-1.amazonaws.com/prod' : customUrl || 'Not specified'}`
               </span>
+            </div>
+
+            {/* Connection Tester section */}
+            <div className="p-4 border border-zinc-250 dark:border-zinc-800 rounded-xl bg-zinc-50/50 dark:bg-zinc-950/20 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-semibold text-zinc-900 dark:text-white">API Diagnostic Connection Tester</h4>
+                  <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">Test real-time status, network latency, and availability flags.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleTestConnection}
+                  disabled={testing}
+                  className="px-3 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg cursor-pointer transition-colors disabled:opacity-50"
+                >
+                  {testing ? 'Testing...' : 'Test Connection'}
+                </button>
+              </div>
+
+              {testResult.connected !== null && (
+                <div className="grid grid-cols-3 gap-4 pt-2 border-t border-zinc-150 dark:border-zinc-800 text-xs">
+                  <div>
+                    <span className="text-[10px] text-zinc-400 dark:text-zinc-500 block mb-0.5">Connection Status</span>
+                    <span className="font-bold flex items-center gap-1">
+                      {testResult.connected ? (
+                        <>
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                          <span className="text-emerald-600 dark:text-emerald-400">🟢 Connected</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                          <span className="text-rose-600 dark:text-rose-400">🔴 Disconnected</span>
+                        </>
+                      )}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-zinc-400 dark:text-zinc-500 block mb-0.5">Response Time</span>
+                    <span className="font-mono font-bold text-zinc-900 dark:text-white">
+                      {testResult.responseTime} ms
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-zinc-400 dark:text-zinc-500 block mb-0.5">Service Status</span>
+                    <span className="font-bold text-zinc-900 dark:text-white capitalize">
+                      {testResult.status}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Save Button */}

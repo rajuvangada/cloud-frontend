@@ -77,7 +77,7 @@ export interface User {
   email: string;
 }
 
-export type ViewType = 'landing' | 'login' | 'register' | 'forgot' | 'dashboard' | 'cost' | 'logs' | 'api' | 'settings';
+export type ViewType = 'landing' | 'login' | 'register' | 'forgot' | 'dashboard' | 'cost' | 'logs' | 'api' | 'settings' | 'mycloud';
 
 export type ThemeType = 'light' | 'dark';
 

@@ -193,53 +193,144 @@ export const calculateCost = async (
 export const parseBackendAnalysis = (analysisText: string): Omit<LogAnalysisResult, 'id' | 'timestamp' | 'logPreview'> => {
   const text = analysisText.toLowerCase();
   
-  if (text.includes('service unavailable') || text.includes('503')) {
+  if (text.includes('database connection failed') || text.includes('db connection failed') || text.includes('database connection')) {
+    return {
+      issueType: 'Database Connection Failure',
+      severity: 'HIGH',
+      possibleCauses: [
+        'Database server is down or unreachable.',
+        'Incorrect database credentials.',
+        'Connection pool exhausted.'
+      ],
+      recommendations: [
+        'Check DB host status, port rules, credentials, and connection pool availability.'
+      ]
+    };
+  } else if (text.includes('memory exceeded') || text.includes('limit exceeded') && text.includes('memory')) {
+    return {
+      issueType: 'Memory Limit Exceeded',
+      severity: 'HIGH',
+      possibleCauses: [
+        'Memory leak or heavy processing.',
+        'Insufficient serverless runtime memory configuration.'
+      ],
+      recommendations: [
+        'Increase Lambda memory allocation or optimize codebase garbage collection.'
+      ]
+    };
+  } else if (text.includes('permission denied')) {
+    return {
+      issueType: 'Permission Denied',
+      severity: 'HIGH',
+      possibleCauses: [
+        'Insufficient IAM permissions or file privileges.',
+        'Unauthorized access request to restricted systems.'
+      ],
+      recommendations: [
+        'Review user roles, access policies, or IAM permissions configuration.'
+      ]
+    };
+  } else if (text.includes('access denied')) {
+    return {
+      issueType: 'Access Denied',
+      severity: 'HIGH',
+      possibleCauses: [
+        'Invalid or expired credentials.',
+        'Forbidden resources access.'
+      ],
+      recommendations: [
+        'Verify credentials, API tokens, or login roles.'
+      ]
+    };
+  } else if (text.includes('throttling') || text.includes('throttle') || text.includes('rate limit')) {
+    return {
+      issueType: 'Rate Limit Throttling',
+      severity: 'HIGH',
+      possibleCauses: [
+        'Too many requests in a given time frame.',
+        'Target API concurrency threshold reached.'
+      ],
+      recommendations: [
+        'Implement backoff and retry mechanisms, check request rates, or request a quota increase.'
+      ]
+    };
+  } else if (text.includes('500')) {
+    return {
+      issueType: 'Internal Server Error (500)',
+      severity: 'HIGH',
+      possibleCauses: [
+        'Unexpected runtime exceptions.',
+        'Application crashed on boot.'
+      ],
+      recommendations: [
+        'Check application server logs, execution environment, and exception stack traces.'
+      ]
+    };
+  } else if (text.includes('503') || text.includes('service unavailable')) {
     return {
       issueType: '503 Service Unavailable',
-      severity: 'CRITICAL',
+      severity: 'HIGH',
       possibleCauses: [
         'Target service backend daemon has crashed or exited.',
         'Application load balancer health checks are failing due to timeouts.',
         'Server runs out of file descriptors or critical resources.'
       ],
       recommendations: [
+        'Check application logs and backend services.',
         'Verify if backend process is running (`docker ps`, `pm2 status`, etc.).',
-        'Review error output from application container logs.',
-        'Check target group health settings and HTTP response status in metrics.'
+        'Review error output from application container logs.'
+      ]
+    };
+  } else if (text.includes('404')) {
+    return {
+      issueType: 'Resource Not Found (404)',
+      severity: 'LOW',
+      possibleCauses: [
+        'Endpoint URL doesn\'t exist.',
+        'Incorrect routing path mapping.'
+      ],
+      recommendations: [
+        'Verify endpoint URL and routing.'
+      ]
+    };
+  } else if (text.includes('certificate') || text.includes('ssl') || text.includes('tls')) {
+    return {
+      issueType: 'SSL/TLS Certificate Error',
+      severity: 'MEDIUM',
+      possibleCauses: [
+        'Expired certificate or untrusted issuer.',
+        'Hostname mismatch during handshake.'
+      ],
+      recommendations: [
+        'Verify SSL/TLS certificate validity, check certificate paths, or renew expiration.'
+      ]
+    };
+  } else if (text.includes('disk full') || text.includes('no space left')) {
+    return {
+      issueType: 'Storage Disk Full',
+      severity: 'HIGH',
+      possibleCauses: [
+        'Logs and temp files occupied total volume storage.',
+        'Lack of auto-rotation storage configurations.'
+      ],
+      recommendations: [
+        'Clean up log directories, clean caches, or expand volume storage capacities.'
       ]
     };
   } else if (text.includes('timeout') || text.includes('network')) {
     return {
-      issueType: 'Request Timeout',
-      severity: 'HIGH',
+      issueType: 'Connection Timeout',
+      severity: 'MEDIUM',
       possibleCauses: [
-        'Database locks preventing fast data fetches.',
-        'Network firewall rules blocking connections to downstream interfaces.',
-        'Unoptimized queries running beyond HTTP Gateway timeouts (30s).'
+        'Database locks preventing fast queries.',
+        'Network response latency exceeded limits.'
       ],
       recommendations: [
-        'Verify current running MySQL/PostgreSQL queries for locks.',
-        'Double-check Security Group ingress/egress policies between network zones.',
-        'Add pagination, optimize database indexes, or run long tasks in background queues.'
-      ]
-    };
-  } else if (text.includes('not listening') || text.includes('refused')) {
-    return {
-      issueType: 'Connection Refused',
-      severity: 'HIGH',
-      possibleCauses: [
-        'The microservice port configuration is mismatching.',
-        'The application crashed on boot and is no longer listening.',
-        'Inbound traffic blocking by server firewall rules (iptables).'
-      ],
-      recommendations: [
-        'Confirm port bindings via environment variables.',
-        'Verify listener processes via netstat commands (`netstat -tulnp`).',
-        'Check local server logs for startup failure stacktraces.'
+        'Check database and network latency.'
       ]
     };
   } else {
-    // Default / unknown logs
+    // Default fallback
     return {
       issueType: 'Generic Diagnostic Alert',
       severity: text.includes('error') ? 'HIGH' : text.includes('warn') ? 'MEDIUM' : 'LOW',
@@ -348,11 +439,17 @@ export const checkApiHealth = async (): Promise<{ ok: boolean; latency: number }
   }
 };
 
-export const fetchHealthStatus = async (): Promise<{ status: 'online' | 'degraded' | 'offline'; checks: any[] }> => {
+export const fetchHealthStatus = async (): Promise<any> => {
   if (useMock) {
     await new Promise((resolve) => setTimeout(resolve, 300));
     return {
-      status: 'online',
+      status: 'healthy',
+      service: 'CloudInsight Lite',
+      version: '1.0.0',
+      api_gateway: 'online',
+      lambda: 'running',
+      mongodb: 'connected',
+      timestamp: new Date().toISOString(),
       checks: [
         { endpoint: '/services', method: 'GET', success: true, status: 200, failures: [], possible_causes: ['Endpoint is operational.'], recommended_actions: ['No action required.'] },
         { endpoint: '/cost', method: 'POST', success: true, status: 200, failures: [], possible_causes: ['Endpoint is operational.'], recommended_actions: ['No action required.'] },
@@ -371,7 +468,16 @@ export const fetchHealthStatus = async (): Promise<{ status: 'online' | 'degrade
     return await response.json();
   } catch (err) {
     console.error('Failed to fetch health status:', err);
-    return { status: 'offline', checks: [] };
+    return {
+      status: 'offline',
+      service: 'CloudInsight Lite',
+      version: '1.0.0',
+      api_gateway: 'offline',
+      lambda: 'running',
+      mongodb: 'disconnected',
+      timestamp: new Date().toISOString(),
+      checks: []
+    };
   }
 };
 
@@ -3134,6 +3240,201 @@ export const calculateGenericCost = async (
       service: service as any
     };
     return { result, latency: Math.round(performance.now() - startTime) };
+  }
+};
+
+export const fetchMyCloudStatus = async (): Promise<any> => {
+  if (useMock) {
+    return { connected: true, access_key_id: "AKIA************1234", region: "us-east-1", is_demo: true };
+  }
+  try {
+    const response = await fetch(getUrl('/my-cloud/status'));
+    return await response.json();
+  } catch (err) {
+    console.error('fetchMyCloudStatus failed:', err);
+    return { connected: false };
+  }
+};
+
+export const connectMyCloudAccount = async (accessKeyId: string, secretAccessKey: string, region: string): Promise<any> => {
+  if (useMock) {
+    return { success: true, is_demo: true, message: "Demo mode connected successfully" };
+  }
+  try {
+    const response = await fetch(getUrl('/my-cloud/connect'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ access_key_id: accessKeyId, secret_access_key: secretAccessKey, region })
+    });
+    return await response.json();
+  } catch (err) {
+    console.error('connectMyCloudAccount failed:', err);
+    return { error: true, message: 'Server connection failed.' };
+  }
+};
+
+export const disconnectMyCloudAccount = async (): Promise<any> => {
+  if (useMock) {
+    return { success: true };
+  }
+  try {
+    const response = await fetch(getUrl('/my-cloud/disconnect'), { method: 'POST' });
+    return await response.json();
+  } catch (err) {
+    console.error('disconnectMyCloudAccount failed:', err);
+    return { error: true, message: 'Server connection failed.' };
+  }
+};
+
+export const fetchMyCloudInventory = async (): Promise<any> => {
+  if (useMock) {
+    return {
+      connected: true,
+      is_demo: true,
+      counts: { ec2_running: 3, ec2_stopped: 2, rds: 1, lambda: 4, s3: 3, ebs: 5, elastic_ip: 2, load_balancer: 1 },
+      ec2_instances: [
+        { id: "i-0abcd1234ef", name: "prod-app-server", type: "t3.medium", state: "running", launch_time: "2026-06-01T10:00:00Z" },
+        { id: "i-0efgh5678ij", name: "dev-sandbox-server", type: "t2.micro", state: "running", launch_time: "2026-06-20T08:15:00Z" },
+        { id: "i-0klmn9012op", name: "test-runner-instance", type: "t3.micro", state: "stopped", launch_time: "2026-06-18T14:30:00Z" },
+        { id: "i-0qrst3456uv", name: "monitoring-server", type: "t3.small", state: "running", launch_time: "2026-06-10T12:00:00Z" },
+        { id: "i-0wxyz7890ab", name: "legacy-backup-host", type: "m5.large", state: "stopped", launch_time: "2026-05-15T09:00:00Z" }
+      ],
+      rds_databases: [
+        { id: "prod-db-postgres", engine: "PostgreSQL", type: "db.t3.medium", status: "available", multi_az: true }
+      ],
+      lambda_functions: [
+        { name: "cost-estimator-calculator", runtime: "python3.9", memory: 256, last_modified: "2026-06-25T14:20:00Z" },
+        { name: "log-diagnostic-scanner", runtime: "python3.9", memory: 512, last_modified: "2026-06-28T09:12:00Z" },
+        { name: "session-auth-validator", runtime: "nodejs18.x", memory: 128, last_modified: "2026-06-10T18:45:00Z" },
+        { name: "database-cleanup-cron", runtime: "python3.10", memory: 128, last_modified: "2026-06-29T02:00:00Z" }
+      ],
+      s3_buckets: [
+        { name: "cloudinsight-app-assets", creation_date: "2026-06-01" },
+        { name: "cloudinsight-security-logs", creation_date: "2026-06-01" },
+        { name: "database-nightly-backups", creation_date: "2026-06-03" }
+      ],
+      ebs_volumes: [
+        { id: "vol-01234abc", size: 80, type: "gp3", state: "in-use", instance_id: "i-0abcd1234ef" },
+        { id: "vol-56789def", size: 20, type: "gp2", state: "in-use", instance_id: "i-0efgh5678ij" },
+        { id: "vol-90123ghi", size: 100, type: "gp3", state: "available", instance_id: null },
+        { id: "vol-45678jkl", size: 30, type: "gp2", state: "in-use", instance_id: "i-0qrst3456uv" },
+        { id: "vol-89012mno", size: 150, type: "standard", state: "available", instance_id: null }
+      ],
+      elastic_ips: [
+        { ip: "54.210.88.92", allocation_id: "eipalloc-012", instance_id: null },
+        { ip: "34.195.12.110", allocation_id: "eipalloc-345", instance_id: "i-0abcd1234ef" }
+      ],
+      load_balancers: [
+        { name: "app-elb-production", type: "application", state: "active", dns_name: "app-elb-prod-1234.us-east-1.elb.amazonaws.com" }
+      ]
+    };
+  }
+  try {
+    const response = await fetch(getUrl('/my-cloud/inventory'));
+    return await response.json();
+  } catch (err) {
+    console.error('fetchMyCloudInventory failed:', err);
+    return { connected: false };
+  }
+};
+
+export const fetchMyCloudCosts = async (): Promise<any> => {
+  if (useMock) {
+    return {
+      connected: true,
+      today_spend: 12.35,
+      mtd_spend: 371.0,
+      forecast_spend: 405.0,
+      breakdown: { EC2: 180.5, RDS: 95.2, S3: 45.1, Lambda: 12.4, CloudWatch: 22.3, "Data Transfer": 15.5 },
+      cost_trend: [
+        { date: "Jun 23", cost: 10.5 },
+        { date: "Jun 24", cost: 11.2 },
+        { date: "Jun 25", cost: 12.0 },
+        { date: "Jun 26", cost: 11.8 },
+        { date: "Jun 27", cost: 12.5 },
+        { date: "Jun 28", cost: 13.1 },
+        { date: "Jun 29", cost: 12.35 }
+      ]
+    };
+  }
+  try {
+    const response = await fetch(getUrl('/my-cloud/costs'));
+    return await response.json();
+  } catch (err) {
+    console.error('fetchMyCloudCosts failed:', err);
+    return { connected: false };
+  }
+};
+
+export const fetchMyCloudCredits = async (): Promise<any> => {
+  if (useMock) {
+    return {
+      connected: true,
+      credits_remaining: 180.0,
+      credits_consumed: 820.0,
+      credits_total: 1000.0,
+      remaining_percentage: 18.0,
+      estimated_days_remaining: 14,
+      alert_active: true
+    };
+  }
+  try {
+    const response = await fetch(getUrl('/my-cloud/credits'));
+    return await response.json();
+  } catch (err) {
+    console.error('fetchMyCloudCredits failed:', err);
+    return { connected: false };
+  }
+};
+
+export const fetchMyCloudRecommendations = async (): Promise<any> => {
+  if (useMock) {
+    return {
+      connected: true,
+      recommendations: [
+        { category: "Idle EC2 instances", severity: "MEDIUM", estimated_savings: 45.0, recommended_actions: "Instance 'dev-sandbox-server' (t2.micro) shows < 2% CPU load. Downsize or stop." },
+        { category: "Unused EBS volumes", severity: "HIGH", estimated_savings: 12.0, recommended_actions: "EBS volume 'vol-90123ghi' (100 GB gp3) has been detached since 2026-06-15. Delete volume." },
+        { category: "Overprovisioned RDS", severity: "MEDIUM", estimated_savings: 75.0, recommended_actions: "RDS database 'prod-db-postgres' (db.t3.medium) CPU load is under 5%. Downsize to db.t3.small." },
+        { category: "Old snapshots", severity: "LOW", estimated_savings: 8.50, recommended_actions: "Remove 3 legacy EBS snapshots older than 180 days that are no longer associated with active AMIs." },
+        { category: "Unused Elastic IPs", severity: "LOW", estimated_savings: 3.60, recommended_actions: "IP '54.210.88.92' is unassociated. Release IP back to public pool." },
+        { category: "S3 lifecycle opportunities", severity: "MEDIUM", estimated_savings: 28.00, recommended_actions: "Move logs-bucket assets older than 60 days to Glacier Deep Archive." },
+        { category: "Savings Plan recommendations", severity: "HIGH", estimated_savings: 140.00, recommended_actions: "Purchase a 1-year Compute Savings Plan covering baseline compute loads to save up to 35%." }
+      ]
+    };
+  }
+  try {
+    const response = await fetch(getUrl('/my-cloud/ai-recommendations'));
+    return await response.json();
+  } catch (err) {
+    console.error('fetchMyCloudRecommendations failed:', err);
+    return { connected: false };
+  }
+};
+
+export const fetchMyCloudHealth = async (): Promise<any> => {
+  if (useMock) {
+    return {
+      connected: true,
+      warnings: [
+        "[prod-app-server] CPU utilization spiked above 92% twice in the past 2 hours.",
+        "[prod-db-postgres] Freeable database memory dropped below 150 MB during nightly cron run."
+      ],
+      predictions: [
+        "[cloudinsight-security-logs] Storage size is projected to grow by 45 GB (31%) in the next 30 days based on ingest rate.",
+        "[cost-estimator-calculator] Lambda execution execution duration is trending upward; memory limits may require right-sizing."
+      ],
+      optimizations: [
+        "[dev-sandbox-server] Consider setting up AWS Instance Scheduler to shut down this instance on weekends (saves 28% of runrate).",
+        "[prod-db-postgres] Enable RDS Storage Auto-scaling to prevent storage full events as size reaches 85%."
+      ]
+    };
+  }
+  try {
+    const response = await fetch(getUrl('/my-cloud/ai-health'));
+    return await response.json();
+  } catch (err) {
+    console.error('fetchMyCloudHealth failed:', err);
+    return { connected: false };
   }
 };
 

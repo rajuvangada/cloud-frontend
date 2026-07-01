@@ -8,6 +8,7 @@ import { CostEstimatorView } from './components/CostEstimatorView';
 import { LogAnalyzerView } from './components/LogAnalyzerView';
 import { ApiHealthView } from './components/ApiHealthView';
 import { SettingsView } from './components/SettingsView';
+import { MyCloudView } from './components/MyCloudView';
 import { LandingPage } from './components/LandingPage';
 import { LoginPage } from './components/LoginPage';
 import { RegisterPage } from './components/RegisterPage';
@@ -344,6 +345,12 @@ export const App: React.FC = () => {
             onClearHistory={handleClearHistory}
             totalEstimates={estimates.length}
             totalAnalyses={analyses.length}
+          />
+        );
+      case 'mycloud':
+        return (
+          <MyCloudView
+            onAddToast={addToast}
           />
         );
       case 'dashboard':

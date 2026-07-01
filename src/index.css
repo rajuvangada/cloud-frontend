@@ -11,7 +11,17 @@
   --color-linear: #5E6AD2;
   --color-linear-hover: #4D58C0;
   --color-vercel: #000000;
+
+  --color-tx: #1e2033;
+  --color-tx-secondary: #4b5563;
+  --color-brand-primary: #3a3f5c;
+  --color-brand-secondary: #1e2033;
+  --color-brand-accent: #818cf8;
+  --color-brand-green: #83C040;
+  --color-bg-glow-start: #A5BBFC;
+  --color-bg-glow-end: #D5E2FF;
 }
+
 
 /* Custom class-based dark mode selector for Tailwind v4 */
 @variant dark (&:where(.dark, .dark *));
@@ -116,3 +126,57 @@ html, body, #root {
 .animate-dash {
   animation: dash 1.5s ease-in-out infinite;
 }
+
+/* Premium Styling Classes and Marquee */
+
+.btn-premium-dark {
+  background: linear-gradient(to bottom, #3a3f5c 0%, #1e2033 100%);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 12px rgba(30, 32, 51, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-premium-dark:hover {
+  background: linear-gradient(to bottom, #474d70 0%, #262940 100%);
+  box-shadow: 0 6px 16px rgba(30, 32, 51, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+.btn-premium-dark:active {
+  transform: scale(0.97) translateY(0);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(30, 32, 51, 0.06);
+}
+
+.dark .glass-card {
+  background: rgba(30, 32, 51, 0.4);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  animation: marquee 25s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+

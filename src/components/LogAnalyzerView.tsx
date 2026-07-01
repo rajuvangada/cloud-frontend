@@ -4,13 +4,14 @@ import { analyzeLog } from '../utils/api';
 import { LoadingSpinner } from './LoadingSpinner';
 import { ResultCard } from './ResultCard';
 import { EmptyState } from './EmptyState';
+import { exportLogHistoryCSV, exportLogHistoryPDF } from '../utils/export';
 import {
   Terminal,
-  AlertTriangle,
   Lightbulb,
   Layers,
   Sparkles,
-  ClipboardList
+  ClipboardList,
+  Download
 } from 'lucide-react';
 
 interface LogAnalyzerViewProps {
@@ -176,11 +177,29 @@ export const LogAnalyzerView: React.FC<LogAnalyzerViewProps> = ({
   return (
     <div className="space-y-8 animate-fade-in">
       {/* Page header */}
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight text-zinc-950 dark:text-white">AI Log Analyzer</h2>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-          Scan application debug streams, check code exceptions, check port blockages, and get remediation advice using AI analysis.
-        </p>
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight text-zinc-950 dark:text-white">AI Log Analyzer</h2>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+            Scan application debug streams, check code exceptions, check port blockages, and get remediation advice using AI analysis.
+          </p>
+        </div>
+        {analyses.length > 0 && (
+          <div className="flex items-center gap-2 font-semibold">
+            <button
+              onClick={() => exportLogHistoryCSV(analyses)}
+              className="px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-250 dark:border-zinc-800 rounded-lg cursor-pointer transition-colors flex items-center gap-1.5"
+            >
+              <Download className="w-3.5 h-3.5" /> Export CSV
+            </button>
+            <button
+              onClick={() => exportLogHistoryPDF(analyses)}
+              className="px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-250 dark:border-zinc-800 rounded-lg cursor-pointer transition-colors flex items-center gap-1.5"
+            >
+              <Download className="w-3.5 h-3.5" /> Export PDF
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -257,11 +276,33 @@ export const LogAnalyzerView: React.FC<LogAnalyzerViewProps> = ({
         {/* Diagnostic Outputs (Right column, 2/3 width) */}
         <div className="lg:col-span-2 space-y-6">
           {loading ? (
-            <div className="border border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900 rounded-xl p-8 shadow-xs flex flex-col items-center justify-center py-20 gap-4">
-              <LoadingSpinner size="lg" color="linear" />
-              <div className="text-center">
-                <p className="text-sm font-semibold text-zinc-800 dark:text-white">Executing AI Diagnostics...</p>
-                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">Comparing signatures, parsing port configurations, generating repair codes</p>
+            <div className="border border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900 rounded-xl p-6 shadow-xs space-y-6 animate-pulse">
+              <div className="flex justify-between items-center pb-5 border-b border-zinc-100 dark:border-zinc-800/80">
+                <div className="space-y-2">
+                  <div className="h-2 w-20 bg-zinc-200 dark:bg-zinc-800 rounded" />
+                  <div className="h-5 w-48 bg-zinc-300 dark:bg-zinc-700 rounded" />
+                </div>
+                <div className="h-8 w-20 bg-zinc-200 dark:bg-zinc-800 rounded-full" />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <div className="h-3 w-32 bg-zinc-200 dark:bg-zinc-800 rounded" />
+                  {[1, 2, 3].map(i => (
+                    <div key={i} className="p-3 border border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/20 rounded-lg space-y-2">
+                      <div className="h-2.5 w-full bg-zinc-200 dark:bg-zinc-800 rounded" />
+                      <div className="h-2.5 w-5/6 bg-zinc-200 dark:bg-zinc-800 rounded" />
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-4">
+                  <div className="h-3 w-32 bg-zinc-200 dark:bg-zinc-800 rounded" />
+                  {[1, 2, 3].map(i => (
+                    <div key={i} className="p-3 border border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/20 rounded-lg space-y-2">
+                      <div className="h-2.5 w-full bg-zinc-200 dark:bg-zinc-800 rounded" />
+                      <div className="h-2.5 w-4/5 bg-zinc-200 dark:bg-zinc-800 rounded" />
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           ) : latestResult ? (
@@ -287,14 +328,21 @@ export const LogAnalyzerView: React.FC<LogAnalyzerViewProps> = ({
                   </div>
                   <div className="flex flex-col items-end gap-1">
                     <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Severity Level</span>
-                    <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold ${
-                      latestResult.severity === 'CRITICAL'
+                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
+                      latestResult.severity === 'CRITICAL' || latestResult.severity === 'HIGH'
                         ? 'bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800/30'
-                        : latestResult.severity === 'HIGH'
+                        : latestResult.severity === 'MEDIUM'
                         ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/30'
-                        : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                        : 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/30'
                     }`}>
-                      <AlertTriangle className="w-3.5 h-3.5" /> {latestResult.severity}
+                      <span className={`w-1.5 h-1.5 rounded-full ${
+                        latestResult.severity === 'CRITICAL' || latestResult.severity === 'HIGH'
+                          ? 'bg-rose-500 animate-pulse'
+                          : latestResult.severity === 'MEDIUM'
+                          ? 'bg-amber-500 animate-pulse'
+                          : 'bg-emerald-500 animate-pulse'
+                      }`} />
+                      {latestResult.severity}
                     </span>
                   </div>
                 </div>
@@ -349,11 +397,20 @@ export const LogAnalyzerView: React.FC<LogAnalyzerViewProps> = ({
                           <span className="text-zinc-400 dark:text-zinc-500 truncate font-mono text-[10px]">{item.logPreview}</span>
                         </div>
                         <div className="text-right">
-                          <span className={`inline-flex text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                          <span className={`inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full ${
                             item.severity === 'CRITICAL' || item.severity === 'HIGH'
-                              ? 'bg-rose-100 dark:bg-rose-950/20 text-rose-500'
-                              : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'
+                              ? 'bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-900/30'
+                              : item.severity === 'MEDIUM'
+                              ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30'
+                              : 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/30'
                           }`}>
+                            <span className={`w-1 h-1 rounded-full ${
+                              item.severity === 'CRITICAL' || item.severity === 'HIGH'
+                                ? 'bg-rose-500 animate-pulse'
+                                : item.severity === 'MEDIUM'
+                                ? 'bg-amber-500 animate-pulse'
+                                : 'bg-emerald-500 animate-pulse'
+                            }`} />
                             {item.severity}
                           </span>
                           <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono block mt-1">
